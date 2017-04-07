@@ -8,106 +8,117 @@
 #
 # SYNOPSIS
 #   sudo MicrosoftSilverlightUpdate.sh
+#   Script to download and install Microsoft Silverlight Player.
 #
 ####################################################################################################
 #
 # HISTORY
 #
-#   Version: 1.2
+#   Version: 1.5
 #
 #   - v.1.0	Steve Miller, 16.12.2015	Used Joe Farage "AdobeReaderUpdate.sh as starting point
 #   - v.1.1	Steve Miller, 16.12.2015	Updated to copy echo commands into JSS policy logs
 #   - v.1.2	Steve Miller, 13.01.2016	Fixed minor errors
+#   - v.1.3	Steve Miller, 07.03.2016	Fixed minor problem with curl commands
+#   - v.1.4	Steve Miller, 07.03.2016	Fixed downloading dmg with curl
+#   - v.1.5	Steve Miller, 01.04.2017	Changed script to use JAMF variable due to MS not updating Mac.dmg file while changing version number on History page
 #
 ####################################################################################################
-# Script to download and install Microsoft Silverlight Player.
-# Only works on Intel systems.
+#
+# DEFINE VARIABLES & READ IN PARAMETERS
+#
+#####################################################################################################
 
-dmgfile="Silverlight.dmg"
-dmgmount="silverlight"
+# Variables used for logging
 logfile="/Library/Logs/SilverlightUpdateScript.log"
-pluginpath="/Library/Internet Plug-Ins/Silverlight.plugin"
-tmpmount=`/usr/bin/mktemp -d /tmp/silverlight.XXXX`
+
+# Variables used by this script
+OSvers_URL=$( sw_vers -productVersion )
+userAgent="Mozilla/5.0 (Macintosh; Intel Mac OS X ${OSvers_URL}) AppleWebKit/535.6.2 (KHTML, like Gecko) Version/5.2 Safari/535.6.2"
 silLightCheckURL="http://www.microsoft.com/getsilverlight/locale/en-us/html/Microsoft%20Silverlight%20Release%20History.htm"
+pluginpath="/Library/Internet Plug-Ins/Silverlight.plugin/Contents/Info.plist"
+SLversion=""
+
+
+# CHECK TO SEE IF A VALUE WERE PASSED IN FOR PARAMETERS AND ASSIGN THEM
+if [ "$4" != "" ] && [ "$SLversion" == "" ]; then
+    SLversion="$4"
+fi
+
+####################################################################################################
+# 
+# SCRIPT CONTENTS - DO NOT MODIFY BELOW THIS LINE
+#
+####################################################################################################
 
 # Are we running on Intel?
 if [ '`/usr/bin/uname -p`'="i386" -o '`/usr/bin/uname -p`'="x86_64" ]; then
-    ## Get OS version and adjust for use with the URL string
-    OSvers_URL=$( sw_vers -productVersion )
+# Get OS version and adjust for use with the URL string
+    OSvers_URL=$( sw_vers -productVersion | sed 's/[.]/_/g' )
 
-    ## Set the User Agent string for use with curl
+# Set the User Agent string for use with curl
     userAgent="Mozilla/5.0 (Macintosh; Intel Mac OS X ${OSvers_URL}) AppleWebKit/535.6.2 (KHTML, like Gecko) Version/5.2 Safari/535.6.2"
 
-    # Get the latest version of Silverlight available from Microsoft's Get Silverlight page.
-    latestver=``
-    while [ -z "$latestver" ]
-    do
-       latestver=`curl -sf "${silLightCheckURL}" 2>/dev/null | grep -m1 "Silverlight 5 Build" | awk -F'[>|<]' '{print $2}' | tr ' ' '\n' | awk '/Build/{getline; print}'`
-    done
-
-    echo "Latest Version is: $latestver"
-    latestvernorm=`echo ${latestver} `
-    # Get the version number of the currently-installed Microsoft Silverlight, if any.
-    if [ -e "${pluginpath}" ]; then
+# Get the version number of the currently-installed Microsoft Silverlight, if any.
+    if [ -f "${pluginpath}" ]; then
         currentinstalledver=`/usr/bin/defaults read "/Library/Internet Plug-Ins/Silverlight.plugin/Contents/Info.plist" CFBundleShortVersionString`
         echo "Current installed version is: $currentinstalledver"
-        if [ "${latestver}" = "${currentinstalledver}" ]; then
+        if [ "${SLversion}" = "${currentinstalledver}" ]; then
             echo "Microsoft Silverlight is current. Exiting"
-            exit 0
+            /bin/echo "`date`: Microsoft Silverlight is current. Exiting, version is ${currentinstalledver}." >> ${logfile}
+            /bin/echo "--" >> ${logfile}
         fi
     else
         currentinstalledver="none"
         echo "Microsoft Silverlight is not installed"
     fi
 
+sleep 3
 
-    url1=`curl -sfA "$UGENT" "http://go.microsoft.com/fwlink/?LinkID=229322" | awk -F'"' '{print $2}'`
+# Building URL and download file
+    dmgfile="Silverlight.dmg"
+    fileURL="http://go.microsoft.com/fwlink/?LinkID=229322"
 
-    #Build URL  
-    url=`echo "${url1}"`
-    echo "Latest version of the URL is: $url"
-
-
-    # Compare the two versions, if they are different or Microsoft Silverlight is not present then download and install the new version.
-    if [ "${currentinstalledver}" != "${latestvernorm}" ]; then
-        /bin/echo "`date`: Current Silverlight version: ${currentinstalledver}" >> ${logfile}
-        /bin/echo "`date`: Available Silverlight version: ${latestver} => ${latestvernorm}" >> ${logfile}
+fi
+# Compare the two versions, if they are different or Microsoft Silverlight is not present then download and install the new version.
+    if [ "${currentinstalledver}" != "${SLversion}" ]; then
+        /bin/echo "`date`: Current Microsoft Silverlight version: ${currentinstalledver}" >> ${logfile}
+        /bin/echo "`date`: Available Microsoft Silverlight version: ${SLversion}" >> ${logfile}
         /bin/echo "`date`: Downloading newer version." >> ${logfile}
-        /usr/bin/curl -s -o /tmp/${dmgfile} ${url}
+        /bin/echo Downloading the DMG
+        /usr/bin/curl -L -o /tmp/${dmgfile} ${fileURL}
         /bin/echo "`date`: Mounting installer disk image." >> ${logfile}
-        /usr/bin/hdiutil attach "/tmp/${dmgfile}" -nobrowse -quiet
+        /bin/echo Mounting the DMG
+        /usr/bin/hdiutil attach /tmp/${dmgfile} -nobrowse -quiet
+        
+# Installing Microsoft Silverlight
+        /bin/echo Installing Microsoft Silverlight
         /bin/echo "`date`: Installing..." >> ${logfile}
         /usr/sbin/installer -pkg /Volumes/Silverlight/silverlight.pkg -target / > /dev/null
 
-        #Unmount DMG and deleting tmp files
+# Unmount DMG and delete tmp files
         /bin/sleep 10
+        /bin/echo "`date`: Cleaning up our mess." >> ${logfile}
         /bin/echo "`date`: Unmounting installer disk image." >> ${logfile}
-        mntpoint=`diskutil list | grep Silverlight | awk '{print $6}' `
+        
+        mntpoint=`diskutil list | grep "Silverlight" | awk '{print $6}' `
         /bin/echo The mount point is "$mntpoint"
-        hdiutil unmount $mntpoint -force -quiet
-        hdiutil detach $mntpoint -force -quiet
+        /usr/bin/hdiutil unmount $mntpoint -force -quiet
+        /usr/bin/hdiutil detach $mntpoint -force -quiet
         /bin/sleep 10
         /bin/echo "`date`: Deleting disk image." >> ${logfile}
-        /bin/rm /tmp/${dmgfile}
+        /bin/rm -rf /tmp/silverlight.*
+        /bin/rm -rf /tmp/${dmgfile}
 
-        #Double check to see if the new version got updated
+# Double check to see if the new version got updated
         newlyinstalledver=`/usr/bin/defaults read "/Library/Internet Plug-Ins/Silverlight.plugin/Contents/Info.plist" CFBundleShortVersionString`
-        if [ "${latestvernorm}" = "${newlyinstalledver}" ]; then
+        if [ "${SLversion}" = "${newlyinstalledver}" ]; then
             /bin/echo "SUCCESS: Microsoft Silverlight has been updated to version ${newlyinstalledver}"
             /bin/echo "`date`: SUCCESS: Microsoft Silverlight has been updated to version ${newlyinstalledver}" >> ${logfile}
+            /bin/echo "--" >> ${logfile}
         else
             /bin/echo "ERROR: Microsoft Silverlight update unsuccessful, version remains at ${currentinstalledver}."
             /bin/echo "`date`: ERROR: Microsoft Silverlight update unsuccessful, version remains at ${currentinstalledver}." >> ${logfile}
             /bin/echo "--" >> ${logfile}
-            exit 1
         fi
-
-    # If Microsoft Silverlight is up to date already, just log it and exit.       
-    else
-        /bin/echo "Microsoft Silverlight is already up to date, running ${currentinstalledver}."
-        /bin/echo "`date`: Microsoft Silverlight is already up to date, running ${currentinstalledver}." >> ${logfile}
-        /bin/echo "--" >> ${logfile}
-    fi  
-else
-    /bin/echo "`date`: ERROR: This script is for Intel Macs only." >> ${logfile}
-fi
+    fi
